@@ -30,7 +30,7 @@ router
 
 Bun.serve({
     port: 3000,
-    routes: await router.load(),
+    routes: router.toRoutes(),
 });
 ```
 
@@ -107,7 +107,7 @@ api
 
 ## Route Files
 
-`router.load(directory?)` optionally imports every `*.ts` file in a directory once, then returns `router.list`.
+`router.load(directory)` imports every `*.ts` file in a directory.
 
 This is useful when route modules register themselves against the default router:
 
@@ -124,17 +124,18 @@ router
 // server.ts
 import router from "@yiffy/bun-router";
 
+await router.load("./routes");
+
 Bun.serve({
-    routes: await router.load("./routes"),
+    routes: router.toRoutes(),
 });
 ```
 
 Notes:
 
-- `load()` is idempotent per router instance
 - only `*.ts` files are scanned
 - importing a route file should have the side effect of registering its routes
-- `load(directory)` imports matching files before returning the route table
+- call `router.toRoutes()` to retrieve the Bun routes object after loading
 
 ## Error Handling
 
@@ -190,13 +191,13 @@ Adds middleware to the current route chain.
 
 Finalizes the route and registers it on the router.
 
-### `await router.load(directory?)`
+### `await router.load(directory)`
 
-Loads route files from a directory and returns `router.list`.
+Loads route files from a directory.
 
-### `router.list`
+### `router.toRoutes()`
 
-The route table to pass into `Bun.serve({ routes })`.
+Returns the route table to pass into `Bun.serve({ routes })`.
 
 ## Built-In Middleware
 
@@ -210,7 +211,7 @@ Runs a side effect after downstream middleware and the handler complete. The han
 
 ### `Middleware.Inject(handler)`
 
-Compatibility alias for `Middleware.Before(handler)`.
+Alias for `Middleware.Before(handler)`.
 
 ### `Middleware.DebugLog`
 
@@ -227,6 +228,8 @@ It can be passed directly as middleware or called with a namespace prefix:
 
 Adds or forwards a request ID header. By default it uses `x-request-id`, writes the value onto the request before the handler runs, and mirrors it onto the response.
 
+If provided, `options.generator(req, server)` is used to create the ID.
+
 It can be passed directly as middleware or configured with options:
 
 - `Middleware.RequestId`
@@ -234,13 +237,13 @@ It can be passed directly as middleware or configured with options:
 
 ### `Middleware.Timing(options?)`
 
-Measures request duration and appends a `Server-Timing` entry to the response. It can also call an optional logger hook with the measured duration and response.
+Measures request duration and appends a `Server-Timing` entry to the response. It can also call an optional logger hook as `log(durationMs, req, response, server)`.
 
 It can be passed directly as middleware or configured with options.
 
 ### `Middleware.CORS(options?)`
 
-Adds standard CORS headers and handles preflight `OPTIONS` requests. It supports fixed origins, allowlists, or a callback for dynamic origin resolution.
+Adds standard CORS headers and handles preflight `OPTIONS` requests. It supports fixed origins, allowlists, or a callback for dynamic origin resolution via `origin(originHeader, req, server)`.
 
 It can be passed directly as middleware or configured with options.
 
@@ -252,7 +255,13 @@ Rejects requests whose body exceeds a configured byte limit with a `413` JSON re
 
 Intercepts downstream errors inside the middleware chain and maps them to a custom response. This is useful when you want route-specific or API-specific error formatting instead of the router's default `500` response.
 
+`options.handler(error, req, server)` can return a custom response, and `options.log(error, req, server)` can be used for custom error logging.
+
 It can be passed directly as middleware or configured with options.
+
+### `Middleware.ModifyRequest(handler)`
+
+Replaces the request object before downstream middleware and the handler run. The handler receives the current request and must return the request instance that should continue through the chain.
 
 ### `Middleware.BasicAuth(options)`
 
@@ -274,7 +283,13 @@ It can be passed directly as middleware or configured with options.
 
 Computes an `ETag` for successful `GET` and `HEAD` responses, sets the header, and returns `304 Not Modified` when the request `If-None-Match` value matches.
 
+If provided, `options.generator(body, response, req, server)` is used before the default SHA-1 based tag generation.
+
 It can be passed directly as middleware or configured with options.
+
+### `Middleware.ModifyResponse(handler)`
+
+Replaces the downstream response before it is returned. The handler receives the response produced by later middleware or the route handler and must return the response that should continue back up the chain.
 
 ### `Middleware.RateLimit(options)`
 
@@ -308,10 +323,24 @@ const inject = Middleware.Inject((req) => {
     req.headers.set("x-legacy-hook", "1");
 });
 const recover = Middleware.Recover;
+const modifyRequest = Middleware.ModifyRequest((req) => new Request(req, {
+    headers: {
+        ...Object.fromEntries(req.headers),
+        "x-replaced-request": "1",
+    },
+}) as Bun.BunRequest);
 const auth = Middleware.BearerAuth({
     validate: (token) => token === process.env.API_TOKEN,
 });
 const etag = Middleware.ETag;
+const modifyResponse = Middleware.ModifyResponse((res) => new Response(res.body, {
+    headers: {
+        ...Object.fromEntries(res.headers),
+        "x-replaced-response": "1",
+    },
+    status: res.status,
+    statusText: res.statusText,
+}));
 const rateLimit = Middleware.RateLimit({ limit: 60, windowMs: 60_000 });
 const methodOverride = Middleware.MethodOverride;
 ```

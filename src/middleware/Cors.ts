@@ -1,17 +1,13 @@
 import type { Middleware } from "../Router.js";
-import type { MaybePromise } from "bun";
+import type { BunRequest, MaybePromise } from "bun";
 
-export interface CORSOptions {
+export interface CORSOptions<Path extends string = string, WebSocketData = unknown> {
     allowCredentials?: boolean;
     allowHeaders?: Array<string> | string;
     allowMethods?: Array<string> | string;
     exposeHeaders?: Array<string> | string;
     maxAge?: number;
-    origin?: string | Array<string> | ((origin: string | null, req: Request) => MaybePromise<string | null | false | undefined>);
-}
-
-interface CORSMiddleware extends Middleware {
-    (options: CORSOptions): Middleware;
+    origin?: string | Array<string> | ((origin: string | null, req: BunRequest<Path>, server: Bun.Server<WebSocketData>) => MaybePromise<string | null | false | undefined>);
 }
 
 function normalizeHeaderList(value?: Array<string> | string): string | null {
@@ -19,11 +15,15 @@ function normalizeHeaderList(value?: Array<string> | string): string | null {
     return Array.isArray(value) ? value.join(", ") : value;
 }
 
-async function resolveOrigin(originConfig: CORSOptions["origin"], req: Request): Promise<string | null> {
+async function resolveOrigin<Path extends string = string, WebSocketData = unknown>(
+    originConfig: CORSOptions<Path, WebSocketData>["origin"],
+    req: BunRequest<Path>,
+    server: Bun.Server<WebSocketData>,
+): Promise<string | null> {
     const requestOrigin = req.headers.get("origin");
     if (!originConfig || originConfig === "*") return "*";
     if (typeof originConfig === "function") {
-        const resolved = await originConfig(requestOrigin, req);
+        const resolved = await originConfig(requestOrigin, req, server);
         if (!resolved) return null;
         return resolved;
     }
@@ -34,7 +34,7 @@ async function resolveOrigin(originConfig: CORSOptions["origin"], req: Request):
     return originConfig;
 }
 
-function applyCorsHeaders(req: Request, headers: Headers, resolvedOrigin: string, options: CORSOptions): void {
+function applyCorsHeaders<Path extends string = string, WebSocketData = unknown>(req: BunRequest<Path>, headers: Headers, resolvedOrigin: string, options: CORSOptions<Path, WebSocketData>): void {
     headers.set("access-control-allow-origin", resolvedOrigin);
 
     if (resolvedOrigin !== "*") {
@@ -57,9 +57,9 @@ function applyCorsHeaders(req: Request, headers: Headers, resolvedOrigin: string
     if (options.maxAge !== undefined) headers.set("access-control-max-age", String(options.maxAge));
 }
 
-function createCORS(options: CORSOptions = {}): Middleware {
+function createCORS<Path extends string = string, WebSocketData = unknown>(options: CORSOptions<Path, WebSocketData> = {}): Middleware<Path, WebSocketData> {
     return async (req, server, next) => {
-        const resolvedOrigin = await resolveOrigin(options.origin, req);
+        const resolvedOrigin = await resolveOrigin(options.origin, req, server);
         if (!resolvedOrigin) {
             if (req.method === "OPTIONS" && req.headers.has("access-control-request-method")) {
                 return new Response(null, { status: 403 });
@@ -79,13 +79,18 @@ function createCORS(options: CORSOptions = {}): Middleware {
     };
 }
 
-const defaultCORS = createCORS();
-const CORS: CORSMiddleware = ((arg1, arg2, arg3) => {
+function CORS<Path extends string = string, WebSocketData = unknown>(req: BunRequest<Path>, server: Bun.Server<WebSocketData>, next: (req: BunRequest<Path>, server: Bun.Server<WebSocketData>) => MaybePromise<Response>): MaybePromise<Response>;
+function CORS<Path extends string = string, WebSocketData = unknown>(options: CORSOptions<Path, WebSocketData>): Middleware<Path, WebSocketData>;
+function CORS<Path extends string = string, WebSocketData = unknown>(
+    arg1: BunRequest<Path> | CORSOptions<Path, WebSocketData>,
+    arg2?: Bun.Server<WebSocketData>,
+    arg3?: (req: BunRequest<Path>, server: Bun.Server<WebSocketData>) => MaybePromise<Response>,
+): MaybePromise<Response> | Middleware<Path, WebSocketData> {
     if (arg1 instanceof Request) {
-        return defaultCORS(arg1, arg2, arg3);
+        return createCORS<Path, WebSocketData>()(arg1, arg2!, arg3!);
     }
 
     return createCORS(arg1);
-}) as CORSMiddleware;
+}
 
 export default CORS;

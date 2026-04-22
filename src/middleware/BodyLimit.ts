@@ -11,7 +11,7 @@ function limitExceededResponse(message: string, status: number): Response {
     return Response.json({ message }, { status });
 }
 
-async function exceedsBodyLimit<T extends string>(req: BunRequest<T>, maxBytes: number): Promise<boolean> {
+async function exceedsBodyLimit<Path extends string = string>(req: BunRequest<Path>, maxBytes: number): Promise<boolean> {
     const clone = req.clone();
     const reader = clone.body?.getReader() as ReadableStreamDefaultReader<Uint8Array> | undefined;
     if (!reader) return false;
@@ -30,7 +30,7 @@ async function exceedsBodyLimit<T extends string>(req: BunRequest<T>, maxBytes: 
     }
 }
 
-export default function BodyLimit({ maxBytes, message = "Request body too large", status = 413 }: BodyLimitOptions): Middleware {
+export default function BodyLimit<Path extends string = string, WebSocketData = unknown>({ maxBytes, message = "Request body too large", status = 413 }: BodyLimitOptions): Middleware<Path, WebSocketData> {
     if (!Number.isFinite(maxBytes) || maxBytes < 0) {
         throw new TypeError("BodyLimit maxBytes must be a non-negative finite number");
     }
@@ -44,7 +44,7 @@ export default function BodyLimit({ maxBytes, message = "Request body too large"
             }
         }
 
-        if (req.body && await exceedsBodyLimit(req, maxBytes)) {
+        if (req.body && await exceedsBodyLimit<Path>(req, maxBytes)) {
             return limitExceededResponse(message, status);
         }
 

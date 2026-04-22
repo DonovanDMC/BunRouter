@@ -1,10 +1,10 @@
-import type { AnyBunServer } from "../Router.js";
+import type { Middleware } from "../Router.js";
 import type { BunRequest, MaybePromise } from "bun";
 
-export type BeforeHandler = <T extends string = string>(req: BunRequest<T>) => MaybePromise<void>;
+export type BeforeHandler<Path extends string = string> = (req: BunRequest<Path>) => MaybePromise<void>;
 
-export default function Before(handler: BeforeHandler) {
-    return <T extends string, S extends AnyBunServer = AnyBunServer>(req: BunRequest<T>, server: S, next: (req: BunRequest<T>, server: S) => MaybePromise<Response>): Promise<Response> => {
+export default function Before<Path extends string = string, WebSocketData = unknown>(handler: BeforeHandler<Path>): Middleware<Path, WebSocketData> {
+    return (req, server, next): Promise<Response> => {
         return Promise.resolve(handler(req)).then(() => next(req, server));
     };
 }

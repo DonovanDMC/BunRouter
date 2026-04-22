@@ -1,4 +1,4 @@
-import type { AnyBunServer, Middleware } from "../Router.js";
+import type { Middleware } from "../Router.js";
 import type { BunRequest, MaybePromise } from "bun";
 
 export interface RateLimitEntry {
@@ -12,18 +12,18 @@ export interface RateLimitStore {
     set(key: string, value: RateLimitEntry): void;
 }
 
-export interface RateLimitOptions<T extends string = string, S extends AnyBunServer = AnyBunServer> {
+export interface RateLimitOptions<Path extends string = string, WebSocketData = unknown> {
     headers?: boolean;
-    key?: (req: BunRequest<T>, server: S) => MaybePromise<string>;
+    key?: (req: BunRequest<Path>, server: Bun.Server<WebSocketData>) => MaybePromise<string>;
     limit: number;
     message?: string;
-    skip?: (req: BunRequest<T>, server: S) => MaybePromise<boolean>;
+    skip?: (req: BunRequest<Path>, server: Bun.Server<WebSocketData>) => MaybePromise<boolean>;
     status?: number;
     store?: RateLimitStore;
     windowMs: number;
 }
 
-function defaultKey<T extends string>(req: BunRequest<T>): string {
+function defaultKey<Path extends string = string>(req: BunRequest<Path>): string {
     return req.headers.get("cf-connecting-ip")
         ?? req.headers.get("x-real-ip")
         ?? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
@@ -38,7 +38,7 @@ function makeRateLimitHeaders(limit: number, remaining: number, resetAt: number)
     };
 }
 
-export default function RateLimit<T extends string = string, S extends AnyBunServer = AnyBunServer>({
+export default function RateLimit<Path extends string = string, WebSocketData = unknown>({
     headers = true,
     key = defaultKey,
     limit,
@@ -47,7 +47,7 @@ export default function RateLimit<T extends string = string, S extends AnyBunSer
     status = 429,
     store = new Map<string, RateLimitEntry>(),
     windowMs,
-}: RateLimitOptions<T, S>): Middleware<T, S> {
+}: RateLimitOptions<Path, WebSocketData>): Middleware<Path, WebSocketData> {
     if (!Number.isInteger(limit) || limit <= 0) {
         throw new TypeError("RateLimit limit must be a positive integer");
     }

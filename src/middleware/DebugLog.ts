@@ -10,13 +10,9 @@ try {
     // ignore
 }
 
-interface DebugLogMiddleware extends Middleware {
-    (namespace: string): Middleware;
-}
-
 let debugMissingWarningEmitted = false;
-function makeDebugLog(namespace: string): Middleware {
-    return Inject((req) => {
+function makeDebugLog<Path extends string = string, WebSocketData = unknown>(namespace: string): Middleware<Path, WebSocketData> {
+    return Inject<Path, WebSocketData>((req) => {
         if (PersistentDebug) {
             PersistentDebug(`${namespace}${req.method.toLowerCase()}`, req.url);
         } else if (!debugMissingWarningEmitted) {
@@ -26,13 +22,18 @@ function makeDebugLog(namespace: string): Middleware {
     });
 }
 
-const defaultDebugLog = makeDebugLog("server:");
-const DebugLog: DebugLogMiddleware = ((arg1: string | BunRequest, arg2?: Bun.Server<never>, arg3?: (req: BunRequest, server: Bun.Server<never>) => MaybePromise<Response>) => {
+function DebugLog<Path extends string = string, WebSocketData = unknown>(req: BunRequest<Path>, server: Bun.Server<WebSocketData>, next: (req: BunRequest<Path>, server: Bun.Server<WebSocketData>) => MaybePromise<Response>): MaybePromise<Response>;
+function DebugLog<Path extends string = string, WebSocketData = unknown>(namespace: string): Middleware<Path, WebSocketData>;
+function DebugLog<Path extends string = string, WebSocketData = unknown>(
+    arg1: string | BunRequest<Path>,
+    arg2?: Bun.Server<WebSocketData>,
+    arg3?: (req: BunRequest<Path>, server: Bun.Server<WebSocketData>) => MaybePromise<Response>,
+): MaybePromise<Response> | Middleware<Path, WebSocketData> {
     if (typeof arg1 === "string") {
-        return makeDebugLog(arg1);
+        return makeDebugLog<Path, WebSocketData>(arg1);
     }
 
-    return defaultDebugLog(arg1, arg2!, arg3!);
-}) as DebugLogMiddleware;
+    return makeDebugLog<Path, WebSocketData>("server:")(arg1, arg2!, arg3!);
+}
 
 export default DebugLog;

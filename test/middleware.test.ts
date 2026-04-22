@@ -1,11 +1,11 @@
 import { describe, expect, it, mock } from "bun:test";
 
 import * as Middleware from "../src/middleware.js";
-import Router, { type AnyBunServer, type Handler, type Middleware as RouterMiddleware } from "../src/Router.js";
+import Router, { type Handler, type Middleware as RouterMiddleware } from "../src/Router.js";
 
 type TestRequest<T extends string = string> = Bun.BunRequest<T>;
 
-const server = {} as AnyBunServer;
+const server = {} as Bun.Server<unknown>;
 
 function makeRequest<T extends string = string>(url = "http://localhost/test", init?: RequestInit, params: Record<string, string> = {}): TestRequest<T> {
     const req = new Request(url, init) as TestRequest<T>;
@@ -29,11 +29,11 @@ describe("Router middleware integration", () => {
     it("applies router-wide middleware to future routes only", async () => {
         const router = new Router();
         const seen: Array<string> = [];
-        const first = mock(async (req: TestRequest, _server: AnyBunServer, next: Handler) => {
+        const first = mock(async (req: TestRequest, _server: Bun.Server<unknown>, next: Handler) => {
             seen.push(`first:${req.method}`);
             return next(req, server);
         });
-        const second = mock(async (req: TestRequest, _server: AnyBunServer, next: Handler) => {
+        const second = mock(async (req: TestRequest, _server: Bun.Server<unknown>, next: Handler) => {
             seen.push(`second:${req.method}`);
             return next(req, server);
         });
@@ -45,9 +45,10 @@ describe("Router middleware integration", () => {
         router.unuseAll(second);
         router.new("/third", "GET").handle(() => new Response("third"));
 
-        const firstRoute = router.list["/first"]?.GET as Handler;
-        const secondRoute = router.list["/second"]?.GET as Handler;
-        const thirdRoute = router.list["/third"]?.GET as Handler;
+        const map = router.getMap();
+        const firstRoute = map["/first"]?.GET as Handler;
+        const secondRoute = map["/second"]?.GET as Handler;
+        const thirdRoute = map["/third"]?.GET as Handler;
 
         await firstRoute(makeRequest("http://localhost/first", { method: "GET" }), server);
         await secondRoute(makeRequest("http://localhost/second", { method: "GET" }), server);
@@ -294,6 +295,34 @@ describe("Recover", () => {
     });
 });
 
+describe("ModifyRequest", () => {
+    it("passes the replaced request downstream", async () => {
+        const middleware = Middleware.ModifyRequest((req) => {
+            const replaced = new Request(req, {
+                headers: {
+                    ...Object.fromEntries(req.headers),
+                    "x-replaced-request": "1",
+                },
+            }) as TestRequest;
+            Object.defineProperty(replaced, "params", {
+                configurable: true,
+                value: req.params,
+                writable: true,
+            });
+            return replaced;
+        });
+
+        let seenHeader = "";
+        const response = await runMiddleware(middleware, makeRequest(), async (req) => {
+            seenHeader = req.headers.get("x-replaced-request") ?? "";
+            return new Response("ok");
+        });
+
+        expect(await response.text()).toBe("ok");
+        expect(seenHeader).toBe("1");
+    });
+});
+
 describe("BasicAuth", () => {
     it("rejects missing credentials", async () => {
         const middleware = Middleware.BasicAuth({
@@ -408,6 +437,26 @@ describe("ETag", () => {
 
         expect(response.status).toBe(304);
         expect(response.headers.get("etag")).toBe(tag);
+    });
+});
+
+describe("ModifyResponse", () => {
+    it("replaces the downstream response", async () => {
+        const middleware = Middleware.ModifyResponse(async (res) => {
+            return new Response(await res.text(), {
+                headers: {
+                    "x-replaced-response": "1",
+                },
+                status: 201,
+                statusText: "Created",
+            });
+        });
+
+        const response = await runMiddleware(middleware, makeRequest(), async () => new Response("ok"));
+
+        expect(await response.text()).toBe("ok");
+        expect(response.status).toBe(201);
+        expect(response.headers.get("x-replaced-response")).toBe("1");
     });
 });
 

@@ -1,13 +1,9 @@
 import type { Middleware } from "../Router.js";
 import type { BunRequest, MaybePromise } from "bun";
 
-export interface RecoverOptions<T extends string = string> {
-    handler?: (error: unknown, req: BunRequest<T>) => MaybePromise<Response>;
-    log?: boolean | ((error: unknown, req: BunRequest<T>) => MaybePromise<void>);
-}
-
-interface RecoverMiddleware extends Middleware {
-    <T extends string = string>(options: RecoverOptions<T>): Middleware<T>;
+export interface RecoverOptions<T extends string = string, WebSocketData = unknown> {
+    handler?: (error: unknown, req: BunRequest<T>, server: Bun.Server<WebSocketData>) => MaybePromise<Response>;
+    log?: boolean | ((error: unknown, req: BunRequest<T>, server: Bun.Server<WebSocketData>) => MaybePromise<void>);
 }
 
 function defaultResponse(error: unknown): Response {
@@ -21,32 +17,37 @@ function defaultResponse(error: unknown): Response {
     return Response.json({ message }, { status: 500 });
 }
 
-function createRecover<T extends string = string>({
+function createRecover<Path extends string = string, WebSocketData = unknown>({
     handler = (error): Response => defaultResponse(error),
     log = false,
-}: RecoverOptions<T> = {}): Middleware<T> {
+}: RecoverOptions<Path, WebSocketData> = {}): Middleware<Path, WebSocketData> {
     return async (req, server, next) => {
         try {
             return await next(req, server);
         } catch (error) {
             if (typeof log === "function") {
-                await log(error, req);
+                await log(error, req, server);
             } else if (log) {
                 console.error(`Recovered error for ${req.method} ${req.url}:`, error);
             }
 
-            return handler(error, req);
+            return handler(error, req, server);
         }
     };
 }
 
-const defaultRecover = createRecover();
-const Recover: RecoverMiddleware = ((arg1, arg2, arg3) => {
+function Recover<Path extends string = string, WebSocketData = unknown>(req: BunRequest<Path>, server: Bun.Server<WebSocketData>, next: (req: BunRequest<Path>, server: Bun.Server<WebSocketData>) => MaybePromise<Response>): MaybePromise<Response>;
+function Recover<Path extends string = string, WebSocketData = unknown>(options: RecoverOptions<Path, WebSocketData>): Middleware<Path, WebSocketData>;
+function Recover<Path extends string = string, WebSocketData = unknown>(
+    arg1: BunRequest<Path> | RecoverOptions<Path, WebSocketData>,
+    arg2?: Bun.Server<WebSocketData>,
+    arg3?: (req: BunRequest<Path>, server: Bun.Server<WebSocketData>) => MaybePromise<Response>,
+): MaybePromise<Response> | Middleware<Path, WebSocketData> {
     if (arg1 instanceof Request) {
-        return defaultRecover(arg1, arg2, arg3);
+        return createRecover<Path, WebSocketData>()(arg1, arg2!, arg3!);
     }
 
     return createRecover(arg1);
-}) as RecoverMiddleware;
+}
 
 export default Recover;

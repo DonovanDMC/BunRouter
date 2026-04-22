@@ -1,13 +1,13 @@
 import { Buffer } from "node:buffer";
 
-import type { AnyBunServer, Middleware } from "../Router.js";
+import type { Middleware } from "../Router.js";
 import type { BunRequest, MaybePromise } from "bun";
 
-export interface BasicAuthOptions<T extends string = string, S extends AnyBunServer = AnyBunServer> {
+export interface BasicAuthOptions<Path extends string = string, WebSocketData = unknown> {
     message?: string;
     realm?: string;
     status?: number;
-    validate: (username: string, password: string, req: BunRequest<T>, server: S) => MaybePromise<boolean | Response>;
+    validate: (username: string, password: string, req: BunRequest<Path>, server: Bun.Server<WebSocketData>) => MaybePromise<boolean | Response>;
 }
 
 function unauthorizedResponse(realm: string, message: string, status: number): Response {
@@ -44,12 +44,12 @@ function parseBasicAuthorization(value: string | null): { password: string; user
     };
 }
 
-export default function BasicAuth<T extends string = string, S extends AnyBunServer = AnyBunServer>({
+export default function BasicAuth<Path extends string = string, WebSocketData = unknown>({
     message = "Unauthorized",
     realm = "Restricted",
     status = 401,
     validate,
-}: BasicAuthOptions<T, S>): Middleware<T, S> {
+}: BasicAuthOptions<Path, WebSocketData>): Middleware<Path, WebSocketData> {
     return async (req, server, next) => {
         const credentials = parseBasicAuthorization(req.headers.get("authorization"));
         if (!credentials) {

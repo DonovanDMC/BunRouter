@@ -1,15 +1,11 @@
 import type { Middleware } from "../Router.js";
-import type { BunRequest } from "bun";
+import type { BunRequest, MaybePromise } from "bun";
 
 export interface MethodOverrideOptions {
     allowedMethods?: Array<string>;
     headerName?: string;
     originalMethodHeader?: string | null;
     queryParameter?: string | null;
-}
-
-interface MethodOverrideMiddleware extends Middleware {
-    (options: MethodOverrideOptions): Middleware;
 }
 
 function getOverriddenMethod(req: Request, headerName: string, queryParameter: string | null): string | null {
@@ -22,7 +18,7 @@ function getOverriddenMethod(req: Request, headerName: string, queryParameter: s
     return fromQuery?.toUpperCase() ?? null;
 }
 
-function withMethod<T extends string>(req: BunRequest<T>, method: string, originalMethodHeader: string | null): BunRequest<T> {
+function withMethod<Path extends string = string>(req: BunRequest<Path>, method: string, originalMethodHeader: string | null): BunRequest<Path> {
     const headers = new Headers(req.headers);
     if (originalMethodHeader) headers.set(originalMethodHeader, req.method);
 
@@ -39,12 +35,12 @@ function withMethod<T extends string>(req: BunRequest<T>, method: string, origin
     return proxy;
 }
 
-function createMethodOverride({
+function createMethodOverride<Path extends string = string, WebSocketData = unknown>({
     allowedMethods = ["POST"],
     headerName = "x-http-method-override",
     originalMethodHeader = "x-original-method",
     queryParameter = "_method",
-}: MethodOverrideOptions = {}): Middleware {
+}: MethodOverrideOptions = {}): Middleware<Path, WebSocketData> {
     const allowed = new Set(allowedMethods.map(method => method.toUpperCase()));
 
     return (req, server, next) => {
@@ -61,13 +57,18 @@ function createMethodOverride({
     };
 }
 
-const defaultMethodOverride = createMethodOverride();
-const MethodOverride: MethodOverrideMiddleware = ((arg1, arg2, arg3) => {
+function MethodOverride<Path extends string = string, WebSocketData = unknown>(req: BunRequest<Path>, server: Bun.Server<WebSocketData>, next: (req: BunRequest<Path>, server: Bun.Server<WebSocketData>) => MaybePromise<Response>): MaybePromise<Response>;
+function MethodOverride<Path extends string = string, WebSocketData = unknown>(options: MethodOverrideOptions): Middleware<Path, WebSocketData>;
+function MethodOverride<Path extends string = string, WebSocketData = unknown>(
+    arg1: BunRequest<Path> | MethodOverrideOptions,
+    arg2?: Bun.Server<WebSocketData>,
+    arg3?: (req: BunRequest<Path>, server: Bun.Server<WebSocketData>) => MaybePromise<Response>,
+): MaybePromise<Response> | Middleware<Path, WebSocketData> {
     if (arg1 instanceof Request) {
-        return defaultMethodOverride(arg1, arg2, arg3);
+        return createMethodOverride<Path, WebSocketData>()(arg1, arg2!, arg3!);
     }
 
-    return createMethodOverride(arg1);
-}) as MethodOverrideMiddleware;
+    return createMethodOverride<Path, WebSocketData>(arg1);
+}
 
 export default MethodOverride;

@@ -3,14 +3,10 @@ import { Buffer } from "node:buffer";
 import type { Middleware } from "../Router.js";
 import type { BunRequest, MaybePromise } from "bun";
 
-export interface ETagOptions<T extends string = string> {
-    generator?: (body: ArrayBuffer, response: Response, req: BunRequest<T>) => MaybePromise<string | null | undefined>;
+export interface ETagOptions<Path extends string = string, WebSocketData = unknown> {
+    generator?: (body: ArrayBuffer, response: Response, req: BunRequest<Path>, server: Bun.Server<WebSocketData>) => MaybePromise<string | null | undefined>;
     methods?: Array<string>;
     weak?: boolean;
-}
-
-interface ETagMiddleware extends Middleware {
-    <T extends string = string>(options: ETagOptions<T>): Middleware<T>;
 }
 
 const defaultMethods = new Set(["GET", "HEAD"]);
@@ -37,11 +33,11 @@ async function defaultGenerator(body: ArrayBuffer, weak: boolean): Promise<strin
     return formatTag(Buffer.from(digest).toString("hex"), weak);
 }
 
-function createETag<T extends string = string>({
+function createETag<Path extends string = string, WebSocketData = unknown>({
     generator,
     methods = [...defaultMethods],
     weak = false,
-}: ETagOptions<T> = {}): Middleware<T> {
+}: ETagOptions<Path, WebSocketData> = {}): Middleware<Path, WebSocketData> {
     const methodSet = new Set(methods.map(method => method.toUpperCase()));
 
     return async (req, server, next) => {
@@ -56,7 +52,7 @@ function createETag<T extends string = string>({
 
         const tag = response.headers.get("etag") ?? await (async () => {
             const body = await response.clone().arrayBuffer();
-            const generated = await generator?.(body, response, req);
+            const generated = await generator?.(body, response, req, server);
             return generated ? formatTag(generated, weak) : defaultGenerator(body, weak);
         })();
 
@@ -71,13 +67,18 @@ function createETag<T extends string = string>({
     };
 }
 
-const defaultETag = createETag();
-const ETag: ETagMiddleware = ((arg1, arg2, arg3) => {
+function ETag<Path extends string = string, WebSocketData = unknown>(req: BunRequest<Path>, server: Bun.Server<WebSocketData>, next: (req: BunRequest<Path>, server: Bun.Server<WebSocketData>) => MaybePromise<Response>): MaybePromise<Response>;
+function ETag<Path extends string = string, WebSocketData = unknown>(options: ETagOptions<Path, WebSocketData>): Middleware<Path, WebSocketData>;
+function ETag<Path extends string = string, WebSocketData = unknown>(
+    arg1: BunRequest<Path> | ETagOptions<Path, WebSocketData>,
+    arg2?: Bun.Server<WebSocketData>,
+    arg3?: (req: BunRequest<Path>, server: Bun.Server<WebSocketData>) => MaybePromise<Response>,
+): MaybePromise<Response> | Middleware<Path, WebSocketData> {
     if (arg1 instanceof Request) {
-        return defaultETag(arg1, arg2, arg3);
+        return createETag<Path, WebSocketData>()(arg1, arg2!, arg3!);
     }
 
     return createETag(arg1);
-}) as ETagMiddleware;
+}
 
 export default ETag;
