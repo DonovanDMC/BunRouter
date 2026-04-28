@@ -45,9 +45,9 @@ export default class Router<WebSocketData = unknown> {
      * Load all of the files from a directory.
      * @param directory Directory to load route files from. All `.ts` files in the directory will be imported. Exports are ignored, the files are expected to register routes to a shared router on import.
      */
-    async load(directory: string | URL): Promise<void> {
+    async load(directory: string | URL, pattern = "**/*.ts"): Promise<void> {
         const dir = directory instanceof URL ? fileURLToPath(directory) : resolve(import.meta.dirname, directory);
-        for await (const name of new Bun.Glob("*.ts").scan(dir)) {
+        for await (const name of new Bun.Glob(pattern).scan(dir)) {
             const path = import.meta.resolve(join(dir, name));
             await import(path);
         }
