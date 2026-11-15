@@ -216,14 +216,16 @@ Alias for `Middleware.Before(handler)`.
 
 ### `Middleware.DebugLog`
 
-Logs requests through `persistent-debug` defaulting to the namespace prefix `server:`. `<method>` is appended to the prefix for each request. For example, a `GET /hello` request would log with the namespace `server:get`.
+Logs requests through `@yiffy/debug` defaulting to the namespace prefix `server:`. `<method>` is appended to the prefix for each request. For example, a `GET /hello` request would log with the namespace `server:get`.
 
 It can be passed directly as middleware or called with a namespace prefix:
 
 - `Middleware.DebugLog`
 - `Middleware.DebugLog("api:")`
 
-`persistent-debug` is an optional dependency. If it is not installed, the middleware emits a one-time process warning instead of throwing.
+Output is filtered with the `LOGGER` environment variable (same syntax as `DEBUG` for the `debug` package), e.g. `LOGGER=server:*`.
+
+`@yiffy/debug` is an optional dependency. If it is not installed, the middleware emits a one-time process warning instead of throwing.
 
 ### `Middleware.RequestId(options?)`
 

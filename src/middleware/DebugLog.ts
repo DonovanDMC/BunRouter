@@ -3,9 +3,9 @@ import Inject from "./Before.js";
 import type { Middleware } from "../Router.js";
 import type { BunRequest, MaybePromise } from "bun";
 
-let PersistentDebug: typeof import("persistent-debug").default | null = null;
+let Debug: typeof import("@yiffy/debug").default | null = null;
 try {
-    PersistentDebug = (await import("persistent-debug")).default;
+    Debug = (await import("@yiffy/debug")).default;
 } catch {
     // ignore
 }
@@ -13,10 +13,10 @@ try {
 let debugMissingWarningEmitted = false;
 function makeDebugLog<Path extends string = string, WebSocketData = unknown>(namespace: string): Middleware<Path, WebSocketData> {
     return Inject<Path, WebSocketData>((req) => {
-        if (PersistentDebug) {
-            PersistentDebug(`${namespace}${req.method.toLowerCase()}`, req.url);
+        if (Debug) {
+            Debug(`${namespace}${req.method.toLowerCase()}`, req.url);
         } else if (!debugMissingWarningEmitted) {
-            process.emitWarning("BunRouter: persistent-debug module is missing. Debug logs will not be available.", { code: "BUN_ROUTER_DEBUG_MISSING" });
+            process.emitWarning("BunRouter: @yiffy/debug module is missing. Debug logs will not be available.", { code: "BUN_ROUTER_DEBUG_MISSING" });
             debugMissingWarningEmitted = true;
         }
     });
