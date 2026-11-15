@@ -13,4 +13,5 @@ export { default as Recover } from "./middleware/Recover.js";
 export { default as ModifyRequest } from "./middleware/ModifyRequest.js";
 export { default as ModifyResponse } from "./middleware/ModifyResponse.js";
 export { default as RequestId } from "./middleware/RequestId.js";
+export { default as Static } from "./middleware/Static.js";
 export { default as Timing } from "./middleware/Timing.js";

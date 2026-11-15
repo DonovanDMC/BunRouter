@@ -133,7 +133,8 @@ Bun.serve({
 
 Notes:
 
-- only `*.ts` files are scanned
+- only `*.ts` files are scanned by default, pass a glob as the second argument to change that
+- relative paths are resolved against the current working directory, pass `new URL("./routes", import.meta.url)` to resolve relative to the calling file instead
 - importing a route file should have the side effect of registering its routes
 - call `router.toRoutes()` to retrieve the Bun routes object after loading
 
@@ -294,6 +295,27 @@ Replaces the downstream response before it is returned. The handler receives the
 ### `Middleware.RateLimit(options)`
 
 Applies a fixed-window rate limit with an in-memory store by default. It can emit standard limit headers and accepts custom key, skip, and storage functions.
+
+### `Middleware.Static({ root, ... })`
+
+Serves files from `root` for `GET` and `HEAD` requests. The request path, minus `options.prefix`, is mapped onto `root`. Requests that escape `root` or hit a dotfile are treated as not found.
+
+- sets `content-type`, `content-length`, `last-modified`, and `cache-control` (from `maxAge` and `immutable`)
+- answers `If-Modified-Since` with `304` and single `Range` requests with `206`
+- serves `index` files (default `index.html`) for directories, redirecting to the trailing-slash URL first unless `redirect` is `false`
+- calls `next` when nothing matches, or returns `404` when `fallthrough` is `false`
+- `headers` adds extra headers, either as an object or `(path, file) => headers`
+
+Register it on a wildcard route so Bun dispatches every path under the prefix to it:
+
+```ts
+router
+    .new("/assets/*")
+    .use(Middleware.Static({ prefix: "/assets", root: new URL("public", import.meta.url), maxAge: 3600 }))
+    .handle(() => new Response("Not Found", { status: 404 }));
+```
+
+Pair it with `Middleware.ETag` if you also want `ETag` validation.
 
 ## Middleware Examples
 

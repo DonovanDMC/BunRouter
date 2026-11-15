@@ -478,3 +478,68 @@ describe("RateLimit", () => {
         expect(third.headers.get("x-ratelimit-limit")).toBe("2");
     });
 });
+
+describe("Static", () => {
+    const root = `${import.meta.dirname}/fixtures/static`;
+    const middleware = Middleware.Static({ prefix: "/static", root });
+    const fallback: Handler = async () => new Response("fallback", { status: 404 });
+
+    it("serves a file under the prefix", async () => {
+        const response = await runMiddleware(middleware, makeRequest("http://localhost/static/hello.txt"), fallback);
+
+        expect(response.status).toBe(200);
+        expect(await response.text()).toBe("hello\n");
+        expect(response.headers.get("content-type")).toStartWith("text/plain");
+        expect(response.headers.get("last-modified")).toBeTruthy();
+    });
+
+    it("serves index files and redirects directories without a trailing slash", async () => {
+        const redirect = await runMiddleware(middleware, makeRequest("http://localhost/static/sub?x=1"), fallback);
+        expect(redirect.status).toBe(301);
+        expect(redirect.headers.get("location")).toBe("/static/sub/?x=1");
+
+        const response = await runMiddleware(middleware, makeRequest("http://localhost/static/sub/"), fallback);
+        expect(await response.text()).toBe("<p>index</p>\n");
+    });
+
+    it("falls through for missing files, dotfiles, and traversal", async () => {
+        for (const path of ["/static/missing.txt", "/static/.secret", "/static/..%2Fmiddleware.test.ts", "/other/hello.txt"]) {
+            const response = await runMiddleware(middleware, makeRequest(`http://localhost${path}`), fallback);
+            expect(await response.text()).toBe("fallback");
+        }
+    });
+
+    it("returns 404 when fallthrough is disabled", async () => {
+        const strict = Middleware.Static({ fallthrough: false, prefix: "/static", root });
+        const response = await runMiddleware(strict, makeRequest("http://localhost/static/missing.txt"), fallback);
+
+        expect(response.status).toBe(404);
+        expect(await response.text()).toBe("Not Found");
+    });
+
+    it("supports single byte ranges", async () => {
+        const response = await runMiddleware(middleware, makeRequest("http://localhost/static/hello.txt", { headers: { range: "bytes=1-3" } }), fallback);
+
+        expect(response.status).toBe(206);
+        expect(response.headers.get("content-range")).toBe("bytes 1-3/6");
+        expect(await response.text()).toBe("ell");
+
+        const invalid = await runMiddleware(middleware, makeRequest("http://localhost/static/hello.txt", { headers: { range: "bytes=10-" } }), fallback);
+        expect(invalid.status).toBe(416);
+    });
+
+    it("returns 304 when if-modified-since is current", async () => {
+        const first = await runMiddleware(middleware, makeRequest("http://localhost/static/hello.txt"), fallback);
+        const response = await runMiddleware(middleware, makeRequest("http://localhost/static/hello.txt", {
+            headers: { "if-modified-since": first.headers.get("last-modified")! },
+        }), fallback);
+
+        expect(response.status).toBe(304);
+    });
+
+    it("skips non GET/HEAD methods", async () => {
+        const response = await runMiddleware(middleware, makeRequest("http://localhost/static/hello.txt", { method: "POST" }), fallback);
+
+        expect(await response.text()).toBe("fallback");
+    });
+});
