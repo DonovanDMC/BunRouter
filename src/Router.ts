@@ -56,7 +56,7 @@ export default class Router<WebSocketData = unknown> {
     /** Start a new route. Chained {@link RouteChain.use | use} calls will only apply to this route. */
     new<R extends string = string>(path: R, method?: Bun.Serve.HTTPMethod): RouteChain<R, WebSocketData> {
         const chain = new RouteChain<R, WebSocketData>(this, path, method);
-        for (const mw of this._middleware) chain.use(mw);
+        for (const mw of this._middleware) chain.use(mw as never);
         return chain;
     }
 
@@ -94,7 +94,7 @@ export class MiddlewareChain<WebSocketData = unknown> {
     /** Start a new route. Chained {@link RouteChain.use | use} calls will only apply to this route. */
     new<R extends string = string>(path: R, method?: Bun.Serve.HTTPMethod): RouteChain<R, WebSocketData> {
         const chain = new RouteChain<R, WebSocketData>(this.router, path, method);
-        for (const mw of this.middlewares) chain.use(mw);
+        for (const mw of this.middlewares) chain.use(mw as never);
         return chain;
     }
 
