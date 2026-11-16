@@ -125,7 +125,7 @@ api
 
 ## Route Files
 
-`router.load(directory)` imports every `*.ts` file in a directory.
+`router.load(directory)` imports every `*.ts` and `*.tsx` file in a directory.
 
 This is useful when route modules register themselves against the default router:
 

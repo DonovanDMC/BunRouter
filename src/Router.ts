@@ -134,7 +134,7 @@ export default class Router<WebSocketData = unknown> {
      * Load all of the files from a directory.
      * @param directory Directory to load route files from. Relative paths are resolved against the current working directory, pass a `URL` (e.g. `new URL("routes", import.meta.url)`) to resolve relative to a module. Files matching `pattern` will be imported. Exports are ignored, the files are expected to register routes to a shared router on import.
      */
-    async load(directory: string | URL, pattern = "**/*.ts"): Promise<void> {
+    async load(directory: string | URL, pattern = "**/*.{ts,tsx}"): Promise<void> {
         const dir = directory instanceof URL ? fileURLToPath(directory) : resolve(directory);
         for await (const name of new Bun.Glob(pattern).scan(dir)) {
             const path = import.meta.resolve(join(dir, name));
