@@ -60,6 +60,24 @@ router
     .handle(() => new Response("ok"));
 ```
 
+### Param Suffixes
+
+Bun params always take the whole path segment, so `/styles/:name.css` would match `/styles/main.js` with a param named `name.css`. The router handles suffixes itself: the route only matches when the param ends with the suffix, and the suffix is stripped from `req.params`.
+
+```ts
+router
+    .new("/styles/:name.css", "GET")
+    .handle((req) => new Response(`stylesheet ${req.params.name}`));
+
+router
+    .new("/styles/:name", "GET")
+    .handle((req) => new Response(`anything else: ${req.params.name}`));
+```
+
+- routes with the same shape (`/styles/:name`, `/styles/:name.css`, `/styles/:file.js`) share one Bun route, longer suffixes are tried first
+- routes that only differ by param names conflict and throw, Bun would otherwise silently keep the last one
+- when nothing matches, `router.notFound(handler)` is used, which defaults to a plain `404`
+
 ## Middleware
 
 Middleware receives `(req, server, next)` and must return a `Response` or a promise for one.
