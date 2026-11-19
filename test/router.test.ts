@@ -84,3 +84,53 @@ describe("param suffixes", () => {
         expect(Object.keys(router.getMap())).toEqual(["/users/:id", "/health"]);
     });
 });
+
+describe("trailing slashes", () => {
+    it("404s by default", async () => {
+        const router = new Router();
+        router.new("/users", "GET").handle(() => new Response("users"));
+        const request = serve(router);
+
+        expect((await request("/users/")).status).toBe(404);
+    });
+
+    it("ignores them", async () => {
+        const router = new Router({ trailingSlash: "ignore" });
+        router.new("/users", "GET").handle(() => new Response("users"));
+        router.new("/users/:id.json", "GET").handle(req => new Response(`json:${req.params.id}`));
+        router.new("/users/:id", "GET").handle(req => new Response(`user:${req.params.id}`));
+        const request = serve(router);
+
+        expect(await (await request("/users/")).text()).toBe("users");
+        expect(await (await request("/users/1/")).text()).toBe("user:1");
+        expect(await (await request("/users/1.json/")).text()).toBe("json:1");
+    });
+
+    it("prefers routes explicitly registered with a trailing slash", async () => {
+        const router = new Router({ trailingSlash: "ignore" });
+        router.new("/a/").handle(() => new Response("slash"));
+        router.new("/a").handle(() => new Response("plain"));
+        const request = serve(router);
+
+        expect(await (await request("/a")).text()).toBe("plain");
+        expect(await (await request("/a/")).text()).toBe("slash");
+    });
+
+    it("redirects them", async () => {
+        const router = new Router().configure({ trailingSlash: "redirect" });
+        router.new("/users/:id", "GET").handle(req => new Response(`user:${req.params.id}`));
+        const request = serve(router);
+
+        const res = await request("/users/1/?x=1", { redirect: "manual" });
+        expect(res.status).toBe(308);
+        expect(res.headers.get("location")).toBe("/users/1?x=1");
+        expect(await (await request("/users/1/")).text()).toBe("user:1");
+    });
+
+    it("leaves the root and wildcards alone", () => {
+        const router = new Router({ trailingSlash: "ignore" });
+        router.new("/").handle(() => new Response("root"));
+        router.new("/assets/*").handle(() => new Response("asset"));
+        expect(Object.keys(router.getMap())).toEqual(["/", "/assets/*"]);
+    });
+});

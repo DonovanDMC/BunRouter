@@ -78,6 +78,20 @@ router
 - routes that only differ by param names conflict and throw, Bun would otherwise silently keep the last one
 - when nothing matches, `router.notFound(handler)` is used, which defaults to a plain `404`
 
+### Trailing Slashes
+
+By default a request to `/users/` won't match a route registered as `/users`. Pass `trailingSlash` to change that, or call `router.configure({ trailingSlash })` (useful for the shared default router):
+
+```ts
+const router = new Router({ trailingSlash: "ignore" });
+```
+
+- `"strict"`: no special handling, the default
+- `"ignore"`: `/users/` is handled by `/users`
+- `"redirect"`: `/users/` gets a `308` redirect to `/users`, keeping the query string
+
+Routes explicitly registered with a trailing slash are always used for that path. The root (`/`) and wildcard routes are left alone.
+
 ## Middleware
 
 Middleware receives `(req, server, next)` and must return a `Response` or a promise for one.
@@ -170,9 +184,15 @@ If you want custom error responses inside the middleware chain, add `Middleware.
 
 ## API
 
-### `new Router()`
+### `new Router(options?)`
 
 Creates an isolated router instance.
+
+- `options.trailingSlash`: the [trailing slash](#trailing-slashes) mode, defaults to `"strict"`
+
+### `router.configure(options)`
+
+Updates the router's options, takes the same options as `new Router(options?)`. Options that aren't provided are left as-is. Changes apply from the next `router.toRoutes()` call.
 
 ### `router.new(path, method?)`
 

@@ -7,6 +7,20 @@ export type RoutePath<R extends string> = string extends R ? R : R extends `${in
 export type Middleware<R extends string = string, WebSocketData = unknown> = (req: Bun.BunRequest<R>, server: Bun.Server<WebSocketData>, next: Handler<R, WebSocketData>) => Bun.MaybePromise<Response>;
 export type Handler<R extends string = string, WebSocketData = unknown> = (req: Bun.BunRequest<R>, server: Bun.Server<WebSocketData>) => Bun.MaybePromise<Response>;
 
+/**
+ * How requests with a trailing slash are handled for routes registered without one.
+ * - `strict`: no special handling, `/users/` won't match `/users` (default)
+ * - `ignore`: `/users/` is handled by `/users`
+ * - `redirect`: `/users/` is redirected to `/users` with a `308`
+ *
+ * Routes explicitly registered with a trailing slash are always used as-is.
+ */
+export type TrailingSlash = "strict" | "ignore" | "redirect";
+export interface RouterOptions {
+    /** See {@link TrailingSlash}. */
+    trailingSlash?: TrailingSlash;
+}
+
 type BunHandler<WebSocketData> = Bun.Serve.Handler<Bun.BunRequest, Bun.Server<WebSocketData>, Response>;
 interface Param {
     name: string;
@@ -42,12 +56,24 @@ function parsePath(path: string): { key: string; params: Array<Param>; path: str
     };
 }
 
+function redirectTrailingSlash(req: Request): Response {
+    const url = new URL(req.url);
+    // collapse leading slashes so `//example.com/` can't become a protocol-relative redirect
+    const path = url.pathname.slice(0, -1).replace(/^\/+/, "/");
+    return new Response(null, { headers: { location: path + url.search }, status: 308 });
+}
+
 export default class Router<WebSocketData = unknown> {
     private _groups = new Map<string, Group<WebSocketData>>();
     private _loaded = false;
     private _middleware: Array<Middleware<string, WebSocketData>> = [];
     private _notFound: Handler<string, WebSocketData> | null = null;
+    private _options: Required<RouterOptions> = { trailingSlash: "strict" };
     private list: Record<string, Partial<Record<Bun.Serve.HTTPMethod, BunHandler<WebSocketData>>>> = {};
+
+    constructor(options: RouterOptions = {}) {
+        this.configure(options);
+    }
 
     private _build(group: Group<WebSocketData>): BunHandler<WebSocketData> | Partial<Record<Bun.Serve.HTTPMethod, BunHandler<WebSocketData>>> {
         const { entries } = group;
@@ -88,6 +114,18 @@ export default class Router<WebSocketData = unknown> {
         return this._notFound ? this._notFound(req, server) : new Response("Not Found", { status: 404 });
     }
 
+    // the trailing slash variants are added here so it doesn't matter what order routes are registered in
+    private _withTrailingSlashes(): Router<WebSocketData>["list"] {
+        if (this._options.trailingSlash === "strict") return this.list;
+
+        const list = { ...this.list };
+        for (const [path, route] of Object.entries(this.list)) {
+            if (path === "/" || path.endsWith("/") || path.endsWith("*") || `${path}/` in list) continue;
+            list[`${path}/`] = this._options.trailingSlash === "ignore" ? route : redirectTrailingSlash as never;
+        }
+        return list;
+    }
+
     // Bun only matches whole segments for params, and silently replaces routes that only differ by param names,
     // so routes are grouped by their shape and dispatched by param suffix here
     _add<R extends string = string>(route: RouteChain<R, WebSocketData>): void {
@@ -118,9 +156,15 @@ export default class Router<WebSocketData = unknown> {
         this.list[group.path] = this._build(group) as never;
     }
 
+    /** Change the router's options, anything not provided is left as-is. Applies from the next {@link toRoutes} call. */
+    configure(options: RouterOptions): this {
+        this._options = { ...this._options, ...Object.fromEntries(Object.entries(options).filter(([, v]) => v !== undefined)) };
+        return this;
+    }
+
     getMap(): Router["list"] {
         return Object.fromEntries(
-            Object.entries(this.list).map(([path, route]) => {
+            Object.entries(this._withTrailingSlashes()).map(([path, route]) => {
                 if (typeof route === "function") {
                     return [path, route];
                 }
@@ -157,7 +201,7 @@ export default class Router<WebSocketData = unknown> {
 
     /** Routes map for the bun server. */
     toRoutes(): Bun.Serve.Routes<WebSocketData, string> {
-        return this.list;
+        return this._withTrailingSlashes();
     }
 
     /** Remove middleware from all future routes in the router, does not affect already registered routes. The provided function must be the exact same function that was previously used. */
