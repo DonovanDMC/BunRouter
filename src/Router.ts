@@ -4,8 +4,21 @@ import { fileURLToPath } from "node:url";
 type StripSuffix<S extends string> = S extends `:${infer P}.${string}` ? `:${P}` : S;
 /** The path with param suffixes removed, `/files/:name.css` becomes `/files/:name`. Routes are typed with this, so `req.params` doesn't include the suffix. */
 export type RoutePath<R extends string> = string extends R ? R : R extends `${infer Segment}/${infer Rest}` ? `${StripSuffix<Segment>}/${RoutePath<Rest>}` : StripSuffix<R>;
-export type Middleware<R extends string = string, WebSocketData = unknown> = (req: Bun.BunRequest<R>, server: Bun.Server<WebSocketData>, next: Handler<R, WebSocketData>) => Bun.MaybePromise<Response>;
-export type Handler<R extends string = string, WebSocketData = unknown> = (req: Bun.BunRequest<R>, server: Bun.Server<WebSocketData>) => Bun.MaybePromise<Response>;
+declare const extensions: unique symbol;
+/**
+ * `Adds` is what the middleware puts on the request for everything after it, `Has` is what earlier middleware already added.
+ * Middleware that adds properties should be typed with this so {@link RouteChain.use | use} can pick them up.
+ */
+export type Middleware<R extends string = string, WebSocketData = unknown, Adds extends object = object, Has extends object = object> = ((req: Bun.BunRequest<R> & Has, server: Bun.Server<WebSocketData>, next: Handler<R, WebSocketData, Adds>) => Bun.MaybePromise<Response>) & {
+    // only used for typing
+    readonly [extensions]?: Adds;
+};
+/** Middleware that works on any path and adds `Adds` to the request, so it can be used on routes with params without being typed for them. */
+export type AnyPathMiddleware<Adds extends object = object> = (<R extends string, WebSocketData>(req: Bun.BunRequest<R>, server: Bun.Server<WebSocketData>, next: Handler<R, WebSocketData, Adds>) => Bun.MaybePromise<Response>) & {
+    readonly [extensions]?: Adds;
+};
+/** `Has` is what middleware added to the request. */
+export type Handler<R extends string = string, WebSocketData = unknown, Has extends object = object> = (req: Bun.BunRequest<R> & Has, server: Bun.Server<WebSocketData>) => Bun.MaybePromise<Response>;
 
 /**
  * How requests with a trailing slash are handled for routes registered without one.
@@ -211,7 +224,7 @@ export default class Router<WebSocketData = unknown> {
     }
 
     /** Start a new middleware chain. Chained {@link MiddlewareChain.use | use} calls will only apply to this chain. */
-    use(middleware: Middleware<string, WebSocketData>): MiddlewareChain<WebSocketData> {
+    use<Adds extends object = object>(middleware: Middleware<string, WebSocketData, Adds>): MiddlewareChain<WebSocketData, Adds> {
         return new MiddlewareChain<WebSocketData>(this).use(middleware);
     }
 
@@ -222,8 +235,8 @@ export default class Router<WebSocketData = unknown> {
     }
 }
 
-export class MiddlewareChain<WebSocketData = unknown> {
-    middlewares: Array<Middleware<string, WebSocketData>> = [];
+export class MiddlewareChain<WebSocketData = unknown, E extends object = object> {
+    middlewares: Array<Middleware<string, WebSocketData, object, never>> = [];
     router: Router<WebSocketData>;
 
     constructor(router: Router<WebSocketData>) {
@@ -231,29 +244,31 @@ export class MiddlewareChain<WebSocketData = unknown> {
     }
 
     /** Start a new route. Chained {@link RouteChain.use | use} calls will only apply to this route. */
-    new<P extends string = string>(path: P, method?: Bun.Serve.HTTPMethod): RouteChain<RoutePath<P>, WebSocketData> {
-        const chain = new RouteChain<RoutePath<P>, WebSocketData>(this.router, path, method);
+    new<P extends string = string>(path: P, method?: Bun.Serve.HTTPMethod): RouteChain<RoutePath<P>, WebSocketData, E> {
+        const chain = new RouteChain<RoutePath<P>, WebSocketData, E>(this.router, path, method);
         for (const mw of this.middlewares) chain.use(mw as never);
         return chain;
     }
 
     /** Remove middleware from this chain. The provided function must be the exact same function that was previously used. */
-    unuse(middleware: Middleware<string, WebSocketData>): this {
+    unuse(middleware: Middleware<string, WebSocketData, object, never>): this {
         this.middlewares = this.middlewares.filter(mw => mw !== middleware);
         return this;
     }
 
     /** Add middleware to this chain. Chained {@link RouteChain.use | use} calls will only apply to routes created from this chain. */
-    use(middleware: Middleware<string, WebSocketData>): this {
+    // the return type is what carries the added properties to later calls, `this` would drop them
+    // eslint-disable-next-line @typescript-eslint/prefer-return-this-type
+    use<Adds extends object = object>(middleware: Middleware<string, WebSocketData, Adds, E>): MiddlewareChain<WebSocketData, E & Adds> {
         this.middlewares.push(middleware);
         return this;
     }
 }
 
-export class RouteChain<R extends string = string, WebSocketData = unknown> {
-    handler!: Handler<R, WebSocketData>;
+export class RouteChain<R extends string = string, WebSocketData = unknown, E extends object = object> {
+    handler!: Handler<R, WebSocketData, E>;
     method?: Bun.Serve.HTTPMethod;
-    middlewares: Array<Middleware<R, WebSocketData>> = [];
+    middlewares: Array<Middleware<R, WebSocketData, object, never>> = [];
     /** The path as registered, including param suffixes. */
     path: string;
     router: Router<WebSocketData>;
@@ -279,9 +294,9 @@ export class RouteChain<R extends string = string, WebSocketData = unknown> {
     private _next(index: number, req: Bun.BunRequest<R>, server: Bun.Server<WebSocketData>): Bun.MaybePromise<Response> {
         if (index < this.middlewares.length) {
             const middleware = this.middlewares[index]!;
-            return middleware(req, server, (nextReq, nextServer) => this._next(index + 1, nextReq, nextServer));
+            return middleware(req as never, server, (nextReq, nextServer) => this._next(index + 1, nextReq, nextServer));
         } else {
-            return this.handler(req, server);
+            return this.handler(req as never, server);
         }
     }
 
@@ -291,15 +306,15 @@ export class RouteChain<R extends string = string, WebSocketData = unknown> {
     }
 
     /** Handle a request for this route. This ends the chain. */
-    handle(func: Handler<R, WebSocketData>): Router<WebSocketData> {
+    handle(func: Handler<R, WebSocketData, E>): Router<WebSocketData> {
         this.handler = func;
-        this.router._add(this);
+        this.router._add(this as never);
         return this.router;
     }
 
     /** Add middleware to this route. Chained {@link RouteChain.use | use} calls will only apply to this route. */
-    use(middleware: Middleware<R, WebSocketData>): this {
+    use<Adds extends object = object>(middleware: Middleware<R, WebSocketData, Adds, E>): RouteChain<R, WebSocketData, E & Adds> {
         this.middlewares.push(middleware);
-        return this;
+        return this as never;
     }
 }

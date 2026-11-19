@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from "bun:test";
+import { afterAll, describe, expect, it, mock } from "bun:test";
 
 import * as Middleware from "../src/middleware.js";
 import Router, { type Handler, type Middleware as RouterMiddleware } from "../src/Router.js";
@@ -268,6 +268,104 @@ describe("BodyLimit", () => {
         const response = await runMiddleware(middleware, req);
 
         expect(response.status).toBe(413);
+    });
+});
+
+describe("BodyParser", () => {
+    const servers: Array<Bun.Server<unknown>> = [];
+    afterAll(() => {
+        for (const s of servers) void s.stop(true);
+    });
+
+    function serve(router: Router): (init: RequestInit) => Promise<Response> {
+        const s = Bun.serve({ port: 0, routes: router.toRoutes() });
+        servers.push(s);
+        return init => fetch(new URL("/body", s.url), { method: "POST", ...init });
+    }
+
+    function echo(options?: Parameters<typeof Middleware.BodyParser>[0]): (init: RequestInit) => Promise<Response> {
+        const router = new Router();
+        router.new("/body", "POST").use(Middleware.BodyParser(options)).handle(req => Response.json({ body: req.parsedBody ?? null }));
+        return serve(router);
+    }
+
+    it("parses json", async () => {
+        const request = echo();
+        const res = await request({ body: JSON.stringify({ a: 1 }), headers: { "content-type": "application/json" } });
+        expect(await res.json()).toEqual({ body: { a: 1 } });
+    });
+
+    it("rejects invalid json", async () => {
+        const request = echo();
+        const res = await request({ body: "{nope", headers: { "content-type": "application/json" } });
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ message: "Invalid JSON body" });
+    });
+
+    it("parses text", async () => {
+        const request = echo();
+        const res = await request({ body: "hello", headers: { "content-type": "text/plain; charset=utf-8" } });
+        expect(await res.json()).toEqual({ body: "hello" });
+    });
+
+    it("parses urlencoded forms, with repeated fields as arrays", async () => {
+        const request = echo();
+        const res = await request({ body: new URLSearchParams([["a", "1"], ["b", "2"], ["b", "3"]]).toString(), headers: { "content-type": "application/x-www-form-urlencoded" } });
+        expect(await res.json()).toEqual({ body: { a: "1", b: ["2", "3"] } });
+    });
+
+    it("parses multipart forms with files", async () => {
+        const router = new Router();
+        router.new("/body", "POST").use(Middleware.BodyParser()).handle(async (req) => {
+            const form = req.parsedBody as Middleware.FormBody;
+            const file = form.upload as File;
+            return Response.json({ name: form.name, file: { name: file.name, type: file.type, text: await file.text() } });
+        });
+        const request = serve(router);
+
+        const body = new FormData();
+        body.append("name", "test");
+        body.append("upload", new File(["file contents"], "hello.txt", { type: "text/plain" }));
+        expect(await (await request({ body })).json()).toEqual({ name: "test", file: { name: "hello.txt", type: "text/plain;charset=utf-8", text: "file contents" } });
+    });
+
+    it("leaves the body undefined when there isn't one", async () => {
+        const request = echo();
+        expect(await (await request({})).json()).toEqual({ body: null });
+    });
+
+    it("rejects content types that aren't accepted", async () => {
+        const request = echo({ accept: ["json"] });
+        expect((await request({ body: "hello", headers: { "content-type": "text/plain" } })).status).toBe(415);
+        expect((await request({ body: "hello", headers: { "content-type": "application/octet-stream" } })).status).toBe(415);
+    });
+
+    it("enforces maxBytes and busboy limits", async () => {
+        const request = echo({ limits: { fileSize: 4 }, maxBytes: 64 });
+        expect((await request({ body: JSON.stringify({ a: "x".repeat(100) }), headers: { "content-type": "application/json" } })).status).toBe(413);
+
+        const body = new FormData();
+        body.append("upload", new File(["too big"], "a.txt"));
+        expect((await request({ body })).status).toBe(413);
+    });
+
+    it("validates with parse and types parsedBody from it", async () => {
+        const router = new Router();
+        router.new("/body", "POST")
+            .use(Middleware.BodyParser({
+                parse(raw) {
+                    if (typeof raw !== "object" || raw === null || typeof (raw as { n?: unknown }).n !== "number") throw new Error("n must be a number");
+                    return raw as { n: number };
+                },
+            }))
+            .handle(req => Response.json({ doubled: req.parsedBody.n * 2 }));
+        const request = serve(router);
+
+        const headers = { "content-type": "application/json" };
+        expect(await (await request({ body: JSON.stringify({ n: 2 }), headers })).json()).toEqual({ doubled: 4 });
+        const res = await request({ body: JSON.stringify({ n: "2" }), headers });
+        expect(res.status).toBe(400);
+        expect(await res.json()).toEqual({ message: "n must be a number" });
     });
 });
 

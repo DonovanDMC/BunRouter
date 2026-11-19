@@ -2,6 +2,7 @@ export { default as After } from "./middleware/After.js";
 export { default as BasicAuth } from "./middleware/BasicAuth.js";
 export { default as BearerAuth } from "./middleware/BearerAuth.js";
 export { default as Before } from "./middleware/Before.js";
+export { default as BodyParser, type BodyParserOptions, type BodyType, type FormBody, type RawBody } from "./middleware/BodyParser.js";
 export { default as BodyLimit } from "./middleware/BodyLimit.js";
 export { default as CORS } from "./middleware/Cors.js";
 export { default as DebugLog } from "./middleware/DebugLog.js";

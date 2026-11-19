@@ -17,7 +17,7 @@ The package exports:
 - `RouteChain`: the chain object returned by `Router.new()` and `MiddlewareChain.new()`
 - `MiddlewareChain`: the chain object returned by `router.use(...)`
 - `Middleware`: built-in middleware helpers
-- `AnyBunServer`, `Middleware`, and `Handler`: TypeScript types for server, middleware, and handlers
+- `AnyBunServer`, `Middleware`, `AnyPathMiddleware`, and `Handler`: TypeScript types for server, middleware, and handlers
 
 ## Quick Start
 
@@ -137,6 +137,28 @@ api
     .handle(() => Response.json({ ok: true }));
 ```
 
+### Middleware That Adds To The Request
+
+Middleware can put properties on the request for everything after it. `use()` picks up what a middleware adds from its type, so later middleware and the handler see it:
+
+```ts
+import { Router, type Middleware } from "@yiffy/bun-router";
+
+function withUser<R extends string>(): Middleware<R, unknown, { user: string }> {
+    return (req, server, next) => next(Object.assign(req, { user: "someone" }), server);
+}
+
+router
+    .new("/users/:id", "GET")
+    .use(withUser())
+    .handle(req => new Response(`${req.user} wants ${req.params.id}`));
+```
+
+- `Middleware<Path, WebSocketData, Adds, Has>`: `Adds` is what the middleware adds, `next` requires it to actually be there. `Has` is what it needs from earlier middleware, `use()` rejects it when nothing before it adds that.
+- `AnyPathMiddleware<Adds>` is the same thing for middleware that doesn't care about the path, so it can be used on any route without being generic.
+- `router.use(...)` chains carry what their middleware add to routes made with `chain.new(...)`.
+- `router.useAll(...)` can't change the router's type, so anything added there isn't typed. Use a middleware chain for that.
+
 ## Route Files
 
 `router.load(directory)` imports every `*.ts` and `*.tsx` file in a directory.
@@ -224,7 +246,7 @@ Starts a `RouteChain` preloaded with the middleware stored on that chain.
 
 ### `route.use(middleware)`
 
-Adds middleware to the current route chain.
+Adds middleware to the current route chain. Properties the middleware [adds to the request](#middleware-that-adds-to-the-request) are typed for later middleware and the handler.
 
 ### `route.handle(handler)`
 
@@ -291,6 +313,28 @@ It can be passed directly as middleware or configured with options.
 ### `Middleware.BodyLimit({ maxBytes, ... })`
 
 Rejects requests whose body exceeds a configured byte limit with a `413` JSON response. It checks `content-length` when available and otherwise measures the streamed body through a cloned request.
+
+### `Middleware.BodyParser(options?)`
+
+Parses the request body into `req.parsedBody`, typed through `use()`.
+
+- `application/json` (and `+json`) is parsed with `JSON.parse`, `400` when it's invalid
+- `text/*` is decoded with the request's charset
+- `application/x-www-form-urlencoded` and `multipart/form-data` are parsed with [`@fastify/busboy`](https://github.com/fastify/busboy), into an object of fields. Files are `File` objects, and repeated fields become arrays.
+- requests without a body get `undefined`
+- `accept` limits which of `"json"`, `"text"`, `"urlencoded"`, and `"multipart"` are parsed, anything else gets a `415`
+- `maxBytes` caps the whole body, `413` when exceeded. Defaults to 1MiB, including uploaded files.
+- `limits` is passed to busboy (`fileSize`, `files`, `fields`, `parts`, etc.), hitting any of them gets a `413`
+- `parse(raw, req)` validates or transforms the body, `req.parsedBody` is typed from its return value. Throwing gets a `400` with the error's message.
+
+```ts
+router
+    .new("/posts", "POST")
+    .use(Middleware.BodyParser({ parse: raw => PostSchema.parse(raw) }))
+    .handle(req => Response.json(createPost(req.parsedBody)));
+```
+
+Without `parse`, `req.parsedBody` is `unknown`. `@fastify/busboy` is an optional dependency, only needed for form bodies. Form bodies throw (and so `500`) when it isn't installed.
 
 ### `Middleware.Recover(options?)`
 
